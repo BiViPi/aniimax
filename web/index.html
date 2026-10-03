@@ -41,6 +41,20 @@
                             <select id="home-level"></select>
                         </div>
                     </div>
+                    <div class="emode-simple-section" id="emode-simple-section">
+                        <div class="input-row emode-simple-row">
+                            <label class="priority-switch emode-switch">
+                                <input type="checkbox" role="switch" id="emode-simple-on" checked>
+                                <span class="switch-track" aria-hidden="true"></span>
+                                <span class="emode-title">Electric Mode (E-mode)</span>
+                            </label>
+                            <div class="input-field emode-simple-rate" id="emode-simple-rate-field">
+                                <label for="simple-power-grid-rate">Power Supply Rate (%)</label>
+                                <input type="number" id="simple-power-grid-rate" value="100" min="10" max="300" step="0.5">
+                            </div>
+                        </div>
+                        <p class="hint small" id="emode-simple-hint">Automatically electrifies all unlocked processing facilities without needing Aniimo workers (unlocked at RV 12).</p>
+                    </div>
                     <p class="hint">Assumes you've built and upgraded everything your RV level allows.</p>
                     <details class="explain simple-details">
                         <summary id="simple-summary-title">Facilities and modules</summary>
@@ -96,6 +110,21 @@
                             <div class="input-field">
                                 <label for="crafting-module-level">Level</label>
                                 <input type="number" id="crafting-module-level" value="0" min="0" max="10">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="emode-section">
+                        <h3>Electric Mode (E-mode) <span class="info-icon" data-tooltip="Unlocked at RV 12. Electrified facilities operate automatically using power and do not require Aniimo workers, freeing them for other tasks. Actual production time = Base E-mode Time / (Power Supply Rate %).">?</span></h3>
+                        <p class="hint">Electrify processing facilities. Electrified facilities run automatically without needing Aniimo workers.</p>
+                        <div class="emode-controls-row">
+                            <div class="input-field emode-rate-field">
+                                <label for="power-grid-rate">Power Supply Rate (%)</label>
+                                <input type="number" id="power-grid-rate" value="100" min="10" max="300" step="0.5">
+                            </div>
+                            <div class="emode-buttons">
+                                <button type="button" id="emode-all-btn" class="skip-add-btn">Enable all E-mode</button>
+                                <button type="button" id="emode-none-btn" class="skip-add-btn">Disable all</button>
                             </div>
                         </div>
                     </div>

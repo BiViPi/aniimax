@@ -225,6 +225,26 @@ const RATE_UNIT_SECONDS = {
 // level 3 and 4 more upgraded to level 5), so a facility can own more than one tier; facilities
 // that don't level up at all (`hasLevels: false`) only ever have exactly one.
 let facilityTiers = {};
+let emodeFacilities = new Set();
+
+function activeEmodeFacilities() {
+    if (isSimpleMode()) {
+        const homeLevel = selectedHomeLevel();
+        const emodeOn = document.getElementById('emode-simple-on')?.checked ?? true;
+        if (!emodeOn || homeLevel < 12) return [];
+        return FACILITIES
+            .filter(f => f.supportsEmode && Object.entries(f.unlocks || {}).some(([, need]) => need <= homeLevel))
+            .map(f => f.name);
+    }
+    return [...emodeFacilities];
+}
+
+function getPowerGridRate() {
+    const id = isSimpleMode() ? 'simple-power-grid-rate' : 'power-grid-rate';
+    const el = document.getElementById(id) || document.getElementById('power-grid-rate');
+    const val = el ? parseFloat(el.value) : 100;
+    return isNaN(val) || val <= 0 ? 1.0 : val / 100;
+}
 
 function defaultFacilityTiers() {
     const tiers = {};
@@ -273,6 +293,7 @@ function renderFacilityCards() {
                 <h4>${f.name} <span class="info-icon" data-tooltip="${f.tooltip}">?</span></h4>
                 <div class="facility-tiers" data-facility="${f.name}"></div>
                 ${f.hasLevels === false ? '' : '<button type="button" class="add-tier-btn" data-facility="' + f.name + '">+ Add level</button>'}
+                ${f.supportsEmode ? `<label class="facility-emode-toggle" title="Run in Electric Mode (automatic, no Aniimo worker needed)"><input type="checkbox" class="facility-emode-checkbox" data-facility="${f.name}" ${emodeFacilities.has(f.name) ? 'checked' : ''}> ⚡ E-mode</label>` : ''}
             </div>
         `).join('');
         return `
@@ -283,6 +304,87 @@ function renderFacilityCards() {
         `;
     }).join('');
     FACILITIES.forEach(f => renderTierRows(f.name));
+}
+
+function attachEmodeHandlers() {
+    const grid = document.getElementById('facilities-grid');
+    if (grid) {
+        grid.addEventListener('change', (e) => {
+            if (e.target.classList.contains('facility-emode-checkbox')) {
+                const fac = e.target.dataset.facility;
+                if (e.target.checked) {
+                    emodeFacilities.add(fac);
+                } else {
+                    emodeFacilities.delete(fac);
+                }
+                saveInputsToStorage();
+            }
+        });
+    }
+
+    const allBtn = document.getElementById('emode-all-btn');
+    if (allBtn) {
+        allBtn.addEventListener('click', () => {
+            FACILITIES.filter(f => f.supportsEmode).forEach(f => emodeFacilities.add(f.name));
+            document.querySelectorAll('.facility-emode-checkbox').forEach(cb => cb.checked = true);
+            saveInputsToStorage();
+        });
+    }
+
+    const noneBtn = document.getElementById('emode-none-btn');
+    if (noneBtn) {
+        noneBtn.addEventListener('click', () => {
+            emodeFacilities.clear();
+            document.querySelectorAll('.facility-emode-checkbox').forEach(cb => cb.checked = false);
+            saveInputsToStorage();
+        });
+    }
+
+    const rateInput = document.getElementById('power-grid-rate');
+    const simpleRate = document.getElementById('simple-power-grid-rate');
+    if (rateInput) {
+        rateInput.addEventListener('input', () => {
+            if (simpleRate) simpleRate.value = rateInput.value;
+            saveInputsToStorage();
+        });
+    }
+    if (simpleRate) {
+        simpleRate.addEventListener('input', () => {
+            if (rateInput) rateInput.value = simpleRate.value;
+            saveInputsToStorage();
+        });
+    }
+
+    const simpleToggle = document.getElementById('emode-simple-on');
+    if (simpleToggle) {
+        simpleToggle.addEventListener('change', () => {
+            saveInputsToStorage();
+        });
+    }
+
+    const homeSelect = document.getElementById('home-level');
+    if (homeSelect) {
+        homeSelect.addEventListener('change', () => {
+            updateSimpleEmodeState();
+        });
+    }
+}
+
+function updateSimpleEmodeState() {
+    const homeLevel = selectedHomeLevel();
+    const hint = document.getElementById('emode-simple-hint');
+    const toggle = document.getElementById('emode-simple-on');
+    const rateField = document.getElementById('emode-simple-rate-field');
+
+    if (homeLevel < 12) {
+        if (toggle) toggle.disabled = true;
+        if (rateField) rateField.style.opacity = '0.5';
+        if (hint) hint.innerHTML = '<span style="color: var(--text-muted);">⚡ Electric Mode unlocks at <strong>RV 12</strong>.</span>';
+    } else {
+        if (toggle) toggle.disabled = false;
+        if (rateField) rateField.style.opacity = '1';
+        if (hint) hint.innerHTML = 'Automatically electrifies all unlocked processing facilities without needing Aniimo workers.';
+    }
 }
 
 // Delegated handlers for the facility grid, covering tier rows added/removed after initial
@@ -360,7 +462,8 @@ function getPersistedFieldIds() {
         'mode-simple', 'mode-advanced', 'home-level',
         'ecological-module-level', 'kitchen-module-level',
         'resource-detector-level', 'crafting-module-level',
-        'rate-unit', 'season-on', 'layout-sim-on'
+        'rate-unit', 'season-on', 'layout-sim-on', 'power-grid-rate',
+        'emode-simple-on', 'simple-power-grid-rate'
     ];
 }
 
@@ -415,7 +518,7 @@ function initFacilityTiers(data) {
 }
 
 function saveInputsToStorage() {
-    const data = { facilityTiers, levelUpStock, skippedRecipes: [...skippedRecipes], unlockedSpecial: [...unlockedSpecial], priorities: priorityOrder, aniimoLevels, roster };
+    const data = { facilityTiers, levelUpStock, skippedRecipes: [...skippedRecipes], unlockedSpecial: [...unlockedSpecial], priorities: priorityOrder, aniimoLevels, roster, emodeFacilities: [...emodeFacilities] };
     getPersistedFieldIds().forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -430,6 +533,12 @@ function saveInputsToStorage() {
 
 function loadInputsFromStorage(data) {
     if (!data) return;
+    if (Array.isArray(data.emodeFacilities)) {
+        emodeFacilities = new Set(data.emodeFacilities);
+        document.querySelectorAll('.facility-emode-checkbox').forEach(cb => {
+            cb.checked = emodeFacilities.has(cb.dataset.facility);
+        });
+    }
     if (data.levelUpStock && typeof data.levelUpStock === 'object') levelUpStock = { ...data.levelUpStock };
     if (Array.isArray(data.skippedRecipes)) skippedRecipes = new Set(data.skippedRecipes.filter(n => typeof n === 'string'));
     if (Array.isArray(data.unlockedSpecial)) unlockedSpecial = new Set(data.unlockedSpecial.filter(n => typeof n === 'string'));
@@ -2560,6 +2669,8 @@ function getPlanInputValues() {
             level_up: levelUpInput(),
             exclude: excludedRecipes(),
             season: seasonActive(),
+            emode_facilities: activeEmodeFacilities(),
+            power_grid_rate: getPowerGridRate(),
             facilities,
             modules
         };
@@ -2587,6 +2698,8 @@ function getPlanInputValues() {
         level_up: levelUpInput(),
         exclude: excludedRecipes(),
         season: seasonActive(),
+        emode_facilities: activeEmodeFacilities(),
+        power_grid_rate: getPowerGridRate(),
         facilities,
         modules
     };
@@ -2806,6 +2919,12 @@ function abilityDot(name, level, note) {
 }
 
 function aniimoLabel(step) {
+    const isEmode = isSimpleMode()
+        ? (document.getElementById('emode-simple-on')?.checked && selectedHomeLevel() >= 12 && FACILITIES.find(f => f.name === step.facility)?.supportsEmode)
+        : emodeFacilities.has(step.facility);
+    if (isEmode && step.status === 'producing') {
+        return '<span class="tag emode-tag" title="Operating in Electric Mode (automatic, no Aniimo worker needed)">⚡ E-mode</span>';
+    }
     const a = step.aniimo;
     if (!a) {
         // Crops and trees: the abilities their planting and harvesting jobs need.
@@ -4045,7 +4164,7 @@ function renderRecipeTables(recipes) {
                     ${cell('Level', r.facility_level)}
                     ${cell('Inputs', formatRecipeInputs(r))}
                     ${cell('Yield', formatRecipeYield(r))}
-                    ${cell('Time', r.workload ? `${r.workload} workload` : formatRecipeTime(r.production_time))}
+                    ${cell('Time', r.workload ? `${r.workload} workload${r.emode_base_time ? ` <span class="tag emode-tag-small" title="E-mode base time: ${formatRecipeTime(r.emode_base_time)}">⚡${formatRecipeTime(r.emode_base_time)}</span>` : ''}` : formatRecipeTime(r.production_time))}
                     ${cell('Sell', formatRecipeSell(r))}
                     ${cell('Module', formatRecipeModule(r))}
                     ${cell('Aniimo', formatRecipeAniimo(r, f))}
@@ -4124,6 +4243,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadInputsFromStorage(savedData);
     attachAutoSave();
     attachFacilityTierHandlers();
+    attachEmodeHandlers();
     attachModeHandlers();
     attachStrategyHandlers();
     attachSkipHandlers();
@@ -4136,6 +4256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     attachPriorityHandlers();
     showAniimoSetup();
     applyConfigMode();
+    updateSimpleEmodeState();
     initWasm();
 
     document.getElementById('optimize-btn').addEventListener('click', runFindPlan);

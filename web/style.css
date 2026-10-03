@@ -2837,3 +2837,90 @@ tr:hover .skip-row,
         animation: none;
     }
 }
+
+/* Electric Mode (E-mode) Styles */
+.emode-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.emode-controls-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+}
+
+.emode-rate-field {
+    min-width: 140px;
+    max-width: 180px;
+}
+
+.emode-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.facility-emode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.facility-emode-toggle input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: #f59e0b;
+}
+
+.facility-emode-toggle:hover {
+    color: var(--text);
+}
+
+.tag.emode-tag {
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid #f59e0b;
+    color: #f59e0b;
+}
+
+.tag.emode-tag-small {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #f59e0b;
+    font-size: 0.65rem;
+    padding: 0 0.35rem;
+}
+
+.emode-simple-section {
+    margin: 0.75rem 0 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.emode-simple-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.emode-title {
+    font-weight: 600;
+}
+
+.emode-simple-rate {
+    max-width: 170px;
+    margin: 0;
+}
+
+

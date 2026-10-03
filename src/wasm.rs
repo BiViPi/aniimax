@@ -1,4 +1,4 @@
-﻿//! WebAssembly bindings for Aniimax.
+//! WebAssembly bindings for Aniimax.
 //!
 //! This module provides JavaScript-accessible functions for the production optimizer.
 
@@ -238,6 +238,7 @@ fn get_embedded_items() -> Vec<ProductionItem> {
             facility_level: row.facility_level,
             module_requirement: parse_module_requirement(&row.module_requirement),
             workload: None,
+            emode_base_time: None,
             byproduct: None,
             environment: row.environment,
             season: None,
@@ -268,6 +269,7 @@ fn get_embedded_items() -> Vec<ProductionItem> {
             facility_level: row.facility_level,
             module_requirement: parse_module_requirement(&row.module_requirement),
             workload: None,
+            emode_base_time: None,
             byproduct: row
                 .byproduct_yield
                 .map(|amt| ("Wood Blocks".to_string(), amt)),
@@ -297,6 +299,7 @@ fn get_embedded_items() -> Vec<ProductionItem> {
             facility_level: row.facility_level,
             module_requirement: parse_module_requirement(&row.module_requirement),
             workload: Some(row.workload),
+            emode_base_time: row.emode_base_time,
             byproduct: row
                 .byproduct_yield
                 .map(|amt| ("Mineral Sand".to_string(), amt)),
@@ -333,6 +336,7 @@ fn get_embedded_items() -> Vec<ProductionItem> {
                 facility_level: row.facility_level,
                 module_requirement: parse_module_requirement(&row.module_requirement),
                 workload: Some(row.workload),
+                emode_base_time: row.emode_base_time,
                 byproduct: None,
                 environment: row.environment,
                 season: None,
@@ -371,6 +375,9 @@ fn get_embedded_items() -> Vec<ProductionItem> {
             facility_level: row.facility_level,
             module_requirement: parse_module_requirement(&row.module_requirement),
             workload: row.workload,
+            emode_base_time: row
+                .emode_base_time
+                .or_else(|| row.workload.map(crate::models::default_emode_base_time)),
             byproduct: None,
             environment: None,
             season: None,
@@ -408,6 +415,9 @@ fn get_embedded_items() -> Vec<ProductionItem> {
             facility_level: row.facility_level,
             module_requirement: parse_module_requirement(&row.module_requirement),
             workload: row.workload,
+            emode_base_time: row
+                .emode_base_time
+                .or_else(|| row.workload.map(crate::models::default_emode_base_time)),
             byproduct: None,
             environment: None,
             season: None,
@@ -445,6 +455,9 @@ fn get_embedded_items() -> Vec<ProductionItem> {
             facility_level: row.facility_level,
             module_requirement: parse_module_requirement(&row.module_requirement),
             workload: row.workload,
+            emode_base_time: row
+                .emode_base_time
+                .or_else(|| row.workload.map(crate::models::default_emode_base_time)),
             byproduct: None,
             environment: None,
             season: None,
@@ -494,6 +507,9 @@ fn get_embedded_items() -> Vec<ProductionItem> {
                 facility_level: row.facility_level,
                 module_requirement: parse_module_requirement(&row.module_requirement),
                 workload: row.workload,
+                emode_base_time: row
+                    .emode_base_time
+                    .or_else(|| row.workload.map(crate::models::default_emode_base_time)),
                 byproduct: None,
                 environment: None,
                 season: None,
@@ -751,6 +767,16 @@ pub struct JsPlanInput {
     /// `"season_points"` (see [`crate::models::SEASON_POINTS`]).
     #[serde(default)]
     pub season: bool,
+    /// Facilities operating in E-mode (Electric mode), by facility name.
+    #[serde(default)]
+    pub emode_facilities: Vec<String>,
+    /// Power grid supply rate (e.g. 1.0 for 100%, 1.2 for 120%, 0.955 for 95.5%). Defaults to 1.0.
+    #[serde(default = "default_power_grid_rate")]
+    pub power_grid_rate: f64,
+}
+
+fn default_power_grid_rate() -> f64 {
+    1.0
 }
 
 /// The player's Aniimo, and what the page knows of the facilities they work (see
@@ -1622,6 +1648,7 @@ impl PreparedInput {
             items.extend(embedded_season_items());
         }
         items.retain(|item| !input.exclude.iter().any(|name| name == crate::models::base_item_name(&item.name)));
+        crate::models::apply_emode(&mut items, &input.emode_facilities, input.power_grid_rate);
         let setup = input
             .aniimo
             .as_deref()
@@ -1927,6 +1954,8 @@ struct RecipeInfo {
     season: bool,
     /// For a season crop, the season currency its seeds cost a batch.
     season_seed_cost: Option<f64>,
+    /// Base production time in seconds under E-mode (Electric mode).
+    emode_base_time: Option<f64>,
 }
 
 /// Get the full recipe list for every item in the game data, grouped by nothing in particular
@@ -1962,6 +1991,7 @@ pub fn get_all_items() -> String {
             byproduct_item: item.byproduct.as_ref().and_then(|(resource, _)| crate::models::byproduct_item(resource)).map(str::to_string),
             season: item.season.is_some(),
             season_seed_cost: item.season.map(|s| s.seed_cost).filter(|&cost| cost > 0.0),
+            emode_base_time: item.emode_base_time,
         })
         .collect();
 
