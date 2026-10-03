@@ -4,7 +4,7 @@ import {
     FACILITIES, FACILITY_CATEGORIES, FACILITY_CATEGORY_BY_NAME, FACILITY_FOOTPRINTS, HOMELAND_PLOTS, HOMELAND_PLOT_SIZE,
     MAX_HOME_LEVEL, ANIIMO_MAX, simpleSetup,
     LEVEL_UP_COSTS, LEVEL_UP_CHAINS, SPECIAL_RECIPES, SEASON, ANIIPOD_TIERS, PERSONALITY_PAIRS, personalityLetter, opposedPersonality,
-    FACILITY_POWER_WATTS, DEFAULT_GENERATOR_WATTS,
+    FACILITY_POWER_WATTS, DEFAULT_GENERATOR_WATTS, GENERATOR_WATTS_BY_HOME_LEVEL, GENERATOR_CAPACITY_OPTIONS,
 } from './facility-config.js';
 
 let wasmReady = false;
@@ -245,7 +245,29 @@ export const EMODE_PRIORITY = [
     'Aniipod Maker'
 ];
 
-export function autoAllocateEmode(homeLevel, maxWatts = DEFAULT_GENERATOR_WATTS) {
+export function getGeneratorCapacity() {
+    if (isSimpleMode()) {
+        const homeLevel = selectedHomeLevel();
+        const el = document.getElementById('simple-generator-capacity');
+        const val = el ? parseInt(el.value, 10) : 0;
+        if (!isNaN(val) && val > 0) return val;
+        return GENERATOR_WATTS_BY_HOME_LEVEL[homeLevel] || DEFAULT_GENERATOR_WATTS;
+    }
+    const el = document.getElementById('generator-capacity');
+    const val = el ? parseInt(el.value, 10) : 0;
+    return !isNaN(val) && val > 0 ? val : DEFAULT_GENERATOR_WATTS;
+}
+
+export function getTargetEmodeWatts(generatorCapacity = getGeneratorCapacity(), powerRate = getPowerGridRate()) {
+    if (powerRate >= 1.15) {
+        // At 120% supply rate, total electrified load must be <= generator capacity / 1.2
+        return Math.floor(generatorCapacity / 1.2);
+    }
+    // At 100% supply rate, total electrified load can reach 100% of generator capacity
+    return generatorCapacity;
+}
+
+export function autoAllocateEmode(homeLevel, maxWatts = getTargetEmodeWatts(), activeProducingCounts = null) {
     if (homeLevel < 12) return {};
     const { facilities } = simpleSetup(homeLevel);
     let remainingWatts = maxWatts;
@@ -257,11 +279,14 @@ export function autoAllocateEmode(homeLevel, maxWatts = DEFAULT_GENERATOR_WATTS)
         const wattsPerUnit = FACILITY_POWER_WATTS[name] || 0;
         if (wattsPerUnit <= 0) continue;
 
-        const ownedUnits = (facilities[name] || []).reduce((sum, t) => sum + t.count, 0);
-        if (ownedUnits <= 0) continue;
+        let availableUnits = (facilities[name] || []).reduce((sum, t) => sum + t.count, 0);
+        if (activeProducingCounts && typeof activeProducingCounts[name] === 'number') {
+            availableUnits = Math.min(availableUnits, activeProducingCounts[name]);
+        }
+        if (availableUnits <= 0) continue;
 
         let countForFac = 0;
-        for (let u = 0; u < ownedUnits; u++) {
+        for (let u = 0; u < availableUnits; u++) {
             if (remainingWatts >= wattsPerUnit) {
                 countForFac++;
                 remainingWatts -= wattsPerUnit;
@@ -276,16 +301,20 @@ export function autoAllocateEmode(homeLevel, maxWatts = DEFAULT_GENERATOR_WATTS)
     return allocated;
 }
 
-function activeEmodeFacilityCounts() {
+function activeEmodeFacilityCounts(activeProducingCounts = null) {
+    const targetWatts = getTargetEmodeWatts();
     if (isSimpleMode()) {
         const homeLevel = selectedHomeLevel();
         const emodeOn = document.getElementById('emode-simple-on')?.checked ?? true;
         if (!emodeOn || homeLevel < 12) return {};
-        return autoAllocateEmode(homeLevel, DEFAULT_GENERATOR_WATTS);
+        return autoAllocateEmode(homeLevel, targetWatts, activeProducingCounts);
     }
     const counts = {};
     emodeFacilities.forEach(name => {
-        const total = (facilityTiers[name] || []).reduce((sum, t) => sum + t.count, 0);
+        let total = (facilityTiers[name] || []).reduce((sum, t) => sum + t.count, 0);
+        if (activeProducingCounts && typeof activeProducingCounts[name] === 'number') {
+            total = Math.min(total, activeProducingCounts[name]);
+        }
         if (total > 0) {
             counts[name] = total;
         }
@@ -293,8 +322,8 @@ function activeEmodeFacilityCounts() {
     return counts;
 }
 
-function activeEmodeFacilities() {
-    return Object.keys(activeEmodeFacilityCounts());
+function activeEmodeFacilities(activeProducingCounts = null) {
+    return Object.keys(activeEmodeFacilityCounts(activeProducingCounts));
 }
 
 function calculatePowerWatts(counts) {
@@ -306,19 +335,22 @@ function calculatePowerWatts(counts) {
     return total;
 }
 
-function updatePowerGauge() {
-    const counts = activeEmodeFacilityCounts();
+function updatePowerGauge(customCounts = null) {
+    const maxWatts = getGeneratorCapacity();
+    const rate = getPowerGridRate();
+    const targetWatts = getTargetEmodeWatts(maxWatts, rate);
+    const counts = customCounts || activeEmodeFacilityCounts();
     const totalWatts = calculatePowerWatts(counts);
-    const maxWatts = DEFAULT_GENERATOR_WATTS;
     const pct = Math.min(100, Math.round((totalWatts / maxWatts) * 100));
 
     // Simple gauge
     const simpleVal = document.getElementById('simple-power-gauge-value');
     const simpleFill = document.getElementById('simple-power-gauge-fill');
     if (simpleVal && simpleFill) {
-        simpleVal.textContent = `${totalWatts}W / ${maxWatts}W (${pct}%)`;
+        const targetLabel = rate >= 1.15 ? ` (120% cap: ${targetWatts}W)` : '';
+        simpleVal.textContent = `${totalWatts}W / ${maxWatts}W (${pct}%)${targetLabel}`;
         simpleFill.style.width = `${Math.min(100, (totalWatts / maxWatts) * 100)}%`;
-        simpleFill.classList.toggle('overload', totalWatts > maxWatts);
+        simpleFill.classList.toggle('overload', totalWatts > targetWatts);
     }
 
     // Advanced gauge
@@ -327,14 +359,18 @@ function updatePowerGauge() {
         const total = (facilityTiers[name] || []).reduce((sum, t) => sum + t.count, 0);
         if (total > 0) advCounts[name] = total;
     });
+    if (customCounts && !isSimpleMode()) advCounts = customCounts;
     const advWatts = calculatePowerWatts(advCounts);
     const advPct = Math.min(100, Math.round((advWatts / maxWatts) * 100));
     const advVal = document.getElementById('advanced-power-gauge-value');
     const advFill = document.getElementById('advanced-power-gauge-fill');
+    const advTitle = document.getElementById('advanced-power-gauge-title');
+    if (advTitle) advTitle.textContent = `⚡ Generator Power (${maxWatts}W Cap):`;
     if (advVal && advFill) {
-        advVal.textContent = `${advWatts}W / ${maxWatts}W (${advPct}%)`;
+        const advTargetLabel = rate >= 1.15 ? ` (120% cap: ${targetWatts}W)` : '';
+        advVal.textContent = `${advWatts}W / ${maxWatts}W (${advPct}%)${advTargetLabel}`;
         advFill.style.width = `${Math.min(100, (advWatts / maxWatts) * 100)}%`;
-        advFill.classList.toggle('overload', advWatts > maxWatts);
+        advFill.classList.toggle('overload', advWatts > targetWatts);
     }
 }
 
@@ -342,7 +378,7 @@ function getPowerGridRate() {
     const id = isSimpleMode() ? 'simple-power-grid-rate' : 'power-grid-rate';
     const el = document.getElementById(id) || document.getElementById('power-grid-rate');
     const val = el ? parseFloat(el.value) : 100;
-    return isNaN(val) || val <= 0 ? 1.0 : val / 100;
+    return val >= 115 ? 1.2 : 1.0;
 }
 
 function defaultFacilityTiers() {
@@ -425,7 +461,7 @@ function attachEmodeHandlers() {
     const autoBtn = document.getElementById('emode-auto-btn');
     if (autoBtn) {
         autoBtn.addEventListener('click', () => {
-            let remainingWatts = DEFAULT_GENERATOR_WATTS;
+            let remainingWatts = getTargetEmodeWatts();
             emodeFacilities.clear();
             for (const name of EMODE_PRIORITY) {
                 const fac = FACILITIES.find(f => f.name === name);
@@ -465,17 +501,36 @@ function attachEmodeHandlers() {
         });
     }
 
-    const rateInput = document.getElementById('power-grid-rate');
+    const rateSelect = document.getElementById('power-grid-rate');
     const simpleRate = document.getElementById('simple-power-grid-rate');
-    if (rateInput) {
-        rateInput.addEventListener('input', () => {
-            if (simpleRate) simpleRate.value = rateInput.value;
+    if (rateSelect) {
+        rateSelect.addEventListener('change', () => {
+            if (simpleRate) simpleRate.value = rateSelect.value;
+            updatePowerGauge();
             saveInputsToStorage();
         });
     }
     if (simpleRate) {
-        simpleRate.addEventListener('input', () => {
-            if (rateInput) rateInput.value = simpleRate.value;
+        simpleRate.addEventListener('change', () => {
+            if (rateSelect) rateSelect.value = simpleRate.value;
+            updatePowerGauge();
+            saveInputsToStorage();
+        });
+    }
+
+    const genSelect = document.getElementById('generator-capacity');
+    const simpleGen = document.getElementById('simple-generator-capacity');
+    if (genSelect) {
+        genSelect.addEventListener('change', () => {
+            if (simpleGen) simpleGen.value = genSelect.value;
+            updatePowerGauge();
+            saveInputsToStorage();
+        });
+    }
+    if (simpleGen) {
+        simpleGen.addEventListener('change', () => {
+            if (genSelect) genSelect.value = simpleGen.value;
+            updatePowerGauge();
             saveInputsToStorage();
         });
     }
@@ -501,18 +556,27 @@ function updateSimpleEmodeState() {
     const hint = document.getElementById('emode-simple-hint');
     const toggle = document.getElementById('emode-simple-on');
     const rateField = document.getElementById('emode-simple-rate-field');
+    const genField = document.getElementById('emode-simple-generator-field');
     const gauge = document.getElementById('simple-power-gauge-container');
+
+    const defaultWatts = GENERATOR_WATTS_BY_HOME_LEVEL[homeLevel] || DEFAULT_GENERATOR_WATTS;
+    const simpleGen = document.getElementById('simple-generator-capacity');
+    const genSelect = document.getElementById('generator-capacity');
+    if (simpleGen) simpleGen.value = String(defaultWatts);
+    if (genSelect) genSelect.value = String(defaultWatts);
 
     if (homeLevel < 12) {
         if (toggle) toggle.disabled = true;
         if (rateField) rateField.style.opacity = '0.5';
+        if (genField) genField.style.opacity = '0.5';
         if (gauge) gauge.style.opacity = '0.5';
         if (hint) hint.innerHTML = '<span style="color: var(--text-muted);">⚡ Electric Mode unlocks at <strong>RV 12</strong>.</span>';
     } else {
         if (toggle) toggle.disabled = false;
         if (rateField) rateField.style.opacity = '1';
+        if (genField) genField.style.opacity = '1';
         if (gauge) gauge.style.opacity = '1';
-        if (hint) hint.innerHTML = 'Auto-balances power within 600W limit. Frees Aniimo workers on electric units; remaining units run manually with Aniimo.';
+        if (hint) hint.innerHTML = `Auto-balances power within generator limit. Frees Aniimo workers on electric units; remaining units run manually with Aniimo.`;
     }
     updatePowerGauge();
 }
@@ -593,7 +657,8 @@ function getPersistedFieldIds() {
         'ecological-module-level', 'kitchen-module-level',
         'resource-detector-level', 'crafting-module-level',
         'rate-unit', 'season-on', 'layout-sim-on', 'power-grid-rate',
-        'emode-simple-on', 'simple-power-grid-rate'
+        'emode-simple-on', 'simple-power-grid-rate',
+        'generator-capacity', 'simple-generator-capacity'
     ];
 }
 
@@ -2788,7 +2853,7 @@ function renderProfitBreakdown(plan) {
 // Get plan-level input values from the form (facilities/modules/prioritize-byproducts, nothing
 // goal-related, since find_plan doesn't need a target). Currency is always coins: the full
 // release removed Bud Tickets, the only other sellable currency.
-function getPlanInputValues() {
+function getPlanInputValues(activeProducingCounts = null) {
     // `facilityTiers` is the live source of truth for owned counts (kept in sync with the DOM by
     // `attachFacilityTierHandlers`), sent straight through as a list of tiers per facility; see
     // `JsPlanInput::facilities` in wasm.rs for the shape (`[{count, level}, ...]` per facility).
@@ -2801,8 +2866,8 @@ function getPlanInputValues() {
             level_up: levelUpInput(),
             exclude: excludedRecipes(),
             season: seasonActive(),
-            emode_facilities: activeEmodeFacilities(),
-            emode_facility_counts: activeEmodeFacilityCounts(),
+            emode_facilities: activeEmodeFacilities(activeProducingCounts),
+            emode_facility_counts: activeEmodeFacilityCounts(activeProducingCounts),
             power_grid_rate: getPowerGridRate(),
             facilities,
             modules
@@ -4037,7 +4102,7 @@ async function runFindPlan() {
         // Whichever Best the player has asked for; the other one waits until they switch to it.
         const bestSetup = selectedAniimoSetup() === 'minimum' ? bestAniimoSetup() : selectedAniimoSetup();
         Object.assign(input, aniimoInput(bestSetup));
-        const bestJson = await callWorker('find_plan', JSON.stringify({ ...input, aniimo: bestSetup }), (count) => {
+        let bestJson = await callWorker('find_plan', JSON.stringify({ ...input, aniimo: bestSetup }), (count) => {
             // The exact planner reports each solve; the backup planner counts its trials.
             if (typeof count === 'object') {
                 setStep(count.step, count.state, undefined, count.proven);
@@ -4049,9 +4114,47 @@ async function runFindPlan() {
         });
         progressFill.style.width = '100%';
         if (runId !== planRunId) return;
+
+        let bestPlan = JSON.parse(bestJson);
+
+        // Smart E-mode reallocation: if some electrified units are idle while other units are producing manually,
+        // reclaim the idle watts and re-solve to electrify active units and free more Aniimo!
+        if (isSimpleMode() && (document.getElementById('emode-simple-on')?.checked ?? true) && selectedHomeLevel() >= 12 && bestPlan.success) {
+            const producingCounts = {};
+            for (const step of bestPlan.coin_items || []) {
+                if (step.status === 'producing' && step.facility) {
+                    const baseFacility = step.facility.replace(/ \(Manual\)$/, '');
+                    producingCounts[baseFacility] = (producingCounts[baseFacility] || 0) + (step.facility_count || 1);
+                }
+            }
+
+            const currentAlloc = input.emode_facility_counts || {};
+            let hasWastedPower = false;
+            for (const [fac, count] of Object.entries(currentAlloc)) {
+                const prod = producingCounts[fac] || 0;
+                if (count > prod) {
+                    hasWastedPower = true;
+                    break;
+                }
+            }
+
+            if (hasWastedPower) {
+                const refinedCounts = activeEmodeFacilityCounts(producingCounts);
+                const refinedFacilities = Object.keys(refinedCounts);
+                if (JSON.stringify(refinedCounts) !== JSON.stringify(currentAlloc)) {
+                    input.emode_facility_counts = refinedCounts;
+                    input.emode_facilities = refinedFacilities;
+                    bestJson = await callWorker('find_plan', JSON.stringify({ ...input, aniimo: bestSetup }));
+                    if (runId !== planRunId) return;
+                    bestPlan = JSON.parse(bestJson);
+                }
+            }
+        }
+
         finishSolveSteps();
-        plansBySetup[bestSetup] = JSON.parse(bestJson);
+        plansBySetup[bestSetup] = bestPlan;
         showSelectedPlan();
+        updatePowerGauge(input.emode_facility_counts);
         // With no plan there's nothing to lay out or improve on.
         if (!plansBySetup[bestSetup].success && progress) {
             progress.steps.forEach(s => { if ((s.key === 'layout' || s.key === 'improve') && s.state === 'pending') s.state = 'skipped'; });

@@ -197,6 +197,27 @@ export const FACILITY_POWER_WATTS = {
 
 export const DEFAULT_GENERATOR_WATTS = 600;
 
+export const GENERATOR_WATTS_BY_HOME_LEVEL = {
+    12: 600,
+    13: 600,
+    14: 800,
+    15: 800,
+    16: 1000,
+    17: 1000,
+    18: 1200,
+    19: 1200,
+    20: 1500,
+};
+
+export const GENERATOR_CAPACITY_OPTIONS = [
+    { watts: 600, level: 1, minHomeLevel: 12, label: '600W (Lv.1: RV 12–13)' },
+    { watts: 800, level: 2, minHomeLevel: 14, label: '800W (Lv.2: RV 14–15)' },
+    { watts: 1000, level: 3, minHomeLevel: 16, label: '1000W (Lv.3: RV 16–17)' },
+    { watts: 1200, level: 4, minHomeLevel: 18, label: '1200W (Lv.4: RV 18–19)' },
+    { watts: 1500, level: 5, minHomeLevel: 20, label: '1500W (Lv.5: RV 20)' },
+];
+
+
 // Aniipod tiers in Aniipod Maker level order: each level adds a better one for catching Aniimo.
 // The "Most Aniipods" strategy makes only the best tier the player's Maker can reach.
 export const ANIIPOD_TIERS = ['aniipod', 'aniipod_pro', 'aniipod_mega'];
