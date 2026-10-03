@@ -210,7 +210,8 @@ pub const FACILITIES_WITHOUT_PERSONALITY: [&str; 2] = ["Dance Pad Polisher", "An
 /// Whether `facility` has a personality whose Aniimo work it faster (see
 /// [`FACILITIES_WITHOUT_PERSONALITY`]).
 pub fn has_personality_bonus(facility: &str) -> bool {
-    !FACILITIES_WITHOUT_PERSONALITY.contains(&facility)
+    let base = facility.strip_suffix(" (Manual)").unwrap_or(facility);
+    !FACILITIES_WITHOUT_PERSONALITY.contains(&base)
 }
 
 /// Efficiency at a facility without a personality ([`FACILITIES_WITHOUT_PERSONALITY`]): 100% at
@@ -233,15 +234,17 @@ pub fn no_personality_efficiency(level: u32, required: u32) -> f64 {
 /// Marks a crop grown without its growing environment, e.g. `rose__uncovered` (see
 /// [`add_uncovered_variants`]).
 pub const UNCOVERED_SUFFIX: &str = "__uncovered";
+pub const MANUAL_SUFFIX: &str = "__manual";
 
 /// The recipe or crop behind an item name: the name without a roster copy's `__by<member>` (see
-/// [`crew_variants`]) or an uncovered variant's suffix.
+/// [`crew_variants`]), an uncovered variant's suffix, or a manual facility variant suffix.
 pub fn base_item_name(name: &str) -> &str {
     let name = match name.rsplit_once(CREW_SUFFIX) {
         Some((base, member)) if !member.is_empty() && member.bytes().all(|b| b.is_ascii_digit()) => base,
         _ => name,
     };
-    name.strip_suffix(UNCOVERED_SUFFIX).unwrap_or(name)
+    let name = name.strip_suffix(UNCOVERED_SUFFIX).unwrap_or(name);
+    name.strip_suffix(MANUAL_SUFFIX).unwrap_or(name)
 }
 
 /// Marks a recipe worked by one Aniimo on the player's roster, e.g. `milled_rice__by2` for the
@@ -548,7 +551,8 @@ impl Workers {
     }
 
     pub fn get(&self, facility: &str) -> Worker {
-        self.by_facility.get(facility).copied().unwrap_or_default()
+        let base = facility.strip_suffix(" (Manual)").unwrap_or(facility);
+        self.by_facility.get(base).or_else(|| self.by_facility.get(facility)).copied().unwrap_or_default()
     }
 
     /// Recomputes every workload-based item's `production_time` for the Aniimo working its
@@ -698,7 +702,8 @@ impl AniimoRequirements {
 
     /// The ability and minimum ability level `item` needs, if it's worked by an Aniimo.
     pub fn get(&self, item: &str) -> Option<(&str, u32)> {
-        self.by_item.get(item).map(|(ability, level)| (ability.as_str(), *level))
+        let base = base_item_name(item);
+        self.by_item.get(base).or_else(|| self.by_item.get(item)).map(|(ability, level)| (ability.as_str(), *level))
     }
 
     /// The Aniimo `setup` puts on `item`. An item without a listed requirement gets a level-1

@@ -4,6 +4,7 @@ import {
     FACILITIES, FACILITY_CATEGORIES, FACILITY_CATEGORY_BY_NAME, FACILITY_FOOTPRINTS, HOMELAND_PLOTS, HOMELAND_PLOT_SIZE,
     MAX_HOME_LEVEL, ANIIMO_MAX, simpleSetup,
     LEVEL_UP_COSTS, LEVEL_UP_CHAINS, SPECIAL_RECIPES, SEASON, ANIIPOD_TIERS, PERSONALITY_PAIRS, personalityLetter, opposedPersonality,
+    FACILITY_POWER_WATTS, DEFAULT_GENERATOR_WATTS,
 } from './facility-config.js';
 
 let wasmReady = false;
@@ -227,16 +228,114 @@ const RATE_UNIT_SECONDS = {
 let facilityTiers = {};
 let emodeFacilities = new Set();
 
-function activeEmodeFacilities() {
+export const EMODE_PRIORITY = [
+    'Jukebox Dryer',
+    'Simmering Pot',
+    'Carousel Mill',
+    'Crafting Table',
+    'Blazing Stove',
+    'Joy Wheel Loom',
+    'Pickling Jar',
+    'Bouncy Brew Keg',
+    'Phonolfactory Table',
+    'Chimney Kiln',
+    'Woodworking Bench',
+    'Claw Game Cooker',
+    'Dance Pad Polisher',
+    'Aniipod Maker'
+];
+
+export function autoAllocateEmode(homeLevel, maxWatts = DEFAULT_GENERATOR_WATTS) {
+    if (homeLevel < 12) return {};
+    const { facilities } = simpleSetup(homeLevel);
+    let remainingWatts = maxWatts;
+    const allocated = {};
+
+    for (const name of EMODE_PRIORITY) {
+        const fac = FACILITIES.find(f => f.name === name);
+        if (!fac || !fac.supportsEmode) continue;
+        const wattsPerUnit = FACILITY_POWER_WATTS[name] || 0;
+        if (wattsPerUnit <= 0) continue;
+
+        const ownedUnits = (facilities[name] || []).reduce((sum, t) => sum + t.count, 0);
+        if (ownedUnits <= 0) continue;
+
+        let countForFac = 0;
+        for (let u = 0; u < ownedUnits; u++) {
+            if (remainingWatts >= wattsPerUnit) {
+                countForFac++;
+                remainingWatts -= wattsPerUnit;
+            } else {
+                break;
+            }
+        }
+        if (countForFac > 0) {
+            allocated[name] = countForFac;
+        }
+    }
+    return allocated;
+}
+
+function activeEmodeFacilityCounts() {
     if (isSimpleMode()) {
         const homeLevel = selectedHomeLevel();
         const emodeOn = document.getElementById('emode-simple-on')?.checked ?? true;
-        if (!emodeOn || homeLevel < 12) return [];
-        return FACILITIES
-            .filter(f => f.supportsEmode && Object.entries(f.unlocks || {}).some(([, need]) => need <= homeLevel))
-            .map(f => f.name);
+        if (!emodeOn || homeLevel < 12) return {};
+        return autoAllocateEmode(homeLevel, DEFAULT_GENERATOR_WATTS);
     }
-    return [...emodeFacilities];
+    const counts = {};
+    emodeFacilities.forEach(name => {
+        const total = (facilityTiers[name] || []).reduce((sum, t) => sum + t.count, 0);
+        if (total > 0) {
+            counts[name] = total;
+        }
+    });
+    return counts;
+}
+
+function activeEmodeFacilities() {
+    return Object.keys(activeEmodeFacilityCounts());
+}
+
+function calculatePowerWatts(counts) {
+    let total = 0;
+    for (const [name, count] of Object.entries(counts)) {
+        const w = FACILITY_POWER_WATTS[name] || 0;
+        total += w * count;
+    }
+    return total;
+}
+
+function updatePowerGauge() {
+    const counts = activeEmodeFacilityCounts();
+    const totalWatts = calculatePowerWatts(counts);
+    const maxWatts = DEFAULT_GENERATOR_WATTS;
+    const pct = Math.min(100, Math.round((totalWatts / maxWatts) * 100));
+
+    // Simple gauge
+    const simpleVal = document.getElementById('simple-power-gauge-value');
+    const simpleFill = document.getElementById('simple-power-gauge-fill');
+    if (simpleVal && simpleFill) {
+        simpleVal.textContent = `${totalWatts}W / ${maxWatts}W (${pct}%)`;
+        simpleFill.style.width = `${Math.min(100, (totalWatts / maxWatts) * 100)}%`;
+        simpleFill.classList.toggle('overload', totalWatts > maxWatts);
+    }
+
+    // Advanced gauge
+    let advCounts = {};
+    emodeFacilities.forEach(name => {
+        const total = (facilityTiers[name] || []).reduce((sum, t) => sum + t.count, 0);
+        if (total > 0) advCounts[name] = total;
+    });
+    const advWatts = calculatePowerWatts(advCounts);
+    const advPct = Math.min(100, Math.round((advWatts / maxWatts) * 100));
+    const advVal = document.getElementById('advanced-power-gauge-value');
+    const advFill = document.getElementById('advanced-power-gauge-fill');
+    if (advVal && advFill) {
+        advVal.textContent = `${advWatts}W / ${maxWatts}W (${advPct}%)`;
+        advFill.style.width = `${Math.min(100, (advWatts / maxWatts) * 100)}%`;
+        advFill.classList.toggle('overload', advWatts > maxWatts);
+    }
 }
 
 function getPowerGridRate() {
@@ -317,8 +416,32 @@ function attachEmodeHandlers() {
                 } else {
                     emodeFacilities.delete(fac);
                 }
+                updatePowerGauge();
                 saveInputsToStorage();
             }
+        });
+    }
+
+    const autoBtn = document.getElementById('emode-auto-btn');
+    if (autoBtn) {
+        autoBtn.addEventListener('click', () => {
+            let remainingWatts = DEFAULT_GENERATOR_WATTS;
+            emodeFacilities.clear();
+            for (const name of EMODE_PRIORITY) {
+                const fac = FACILITIES.find(f => f.name === name);
+                if (!fac || !fac.supportsEmode) continue;
+                const w = FACILITY_POWER_WATTS[name] || 0;
+                const owned = (facilityTiers[name] || []).reduce((sum, t) => sum + t.count, 0);
+                if (owned > 0 && remainingWatts >= w * owned) {
+                    emodeFacilities.add(name);
+                    remainingWatts -= w * owned;
+                }
+            }
+            document.querySelectorAll('.facility-emode-checkbox').forEach(cb => {
+                cb.checked = emodeFacilities.has(cb.dataset.facility);
+            });
+            updatePowerGauge();
+            saveInputsToStorage();
         });
     }
 
@@ -327,6 +450,7 @@ function attachEmodeHandlers() {
         allBtn.addEventListener('click', () => {
             FACILITIES.filter(f => f.supportsEmode).forEach(f => emodeFacilities.add(f.name));
             document.querySelectorAll('.facility-emode-checkbox').forEach(cb => cb.checked = true);
+            updatePowerGauge();
             saveInputsToStorage();
         });
     }
@@ -336,6 +460,7 @@ function attachEmodeHandlers() {
         noneBtn.addEventListener('click', () => {
             emodeFacilities.clear();
             document.querySelectorAll('.facility-emode-checkbox').forEach(cb => cb.checked = false);
+            updatePowerGauge();
             saveInputsToStorage();
         });
     }
@@ -358,6 +483,7 @@ function attachEmodeHandlers() {
     const simpleToggle = document.getElementById('emode-simple-on');
     if (simpleToggle) {
         simpleToggle.addEventListener('change', () => {
+            updatePowerGauge();
             saveInputsToStorage();
         });
     }
@@ -375,16 +501,20 @@ function updateSimpleEmodeState() {
     const hint = document.getElementById('emode-simple-hint');
     const toggle = document.getElementById('emode-simple-on');
     const rateField = document.getElementById('emode-simple-rate-field');
+    const gauge = document.getElementById('simple-power-gauge-container');
 
     if (homeLevel < 12) {
         if (toggle) toggle.disabled = true;
         if (rateField) rateField.style.opacity = '0.5';
+        if (gauge) gauge.style.opacity = '0.5';
         if (hint) hint.innerHTML = '<span style="color: var(--text-muted);">⚡ Electric Mode unlocks at <strong>RV 12</strong>.</span>';
     } else {
         if (toggle) toggle.disabled = false;
         if (rateField) rateField.style.opacity = '1';
-        if (hint) hint.innerHTML = 'Automatically electrifies all unlocked processing facilities without needing Aniimo workers.';
+        if (gauge) gauge.style.opacity = '1';
+        if (hint) hint.innerHTML = 'Auto-balances power within 600W limit. Frees Aniimo workers on electric units; remaining units run manually with Aniimo.';
     }
+    updatePowerGauge();
 }
 
 // Delegated handlers for the facility grid, covering tier rows added/removed after initial
@@ -581,6 +711,7 @@ function loadInputsFromStorage(data) {
         }
     });
     levelUpTargetChosen = 'level-up-target' in data;
+    updatePowerGauge();
 }
 
 // Auto-save on every change to a persisted static field (facility tier inputs save themselves;
@@ -688,6 +819,7 @@ function applyConfigMode() {
     document.getElementById('advanced-config').style.display = simple ? 'none' : 'block';
     if (simple) renderSimpleSummary();
     renderStrategy();
+    updatePowerGauge();
 }
 
 // Fills the advanced inputs with everything `homeLevel` allows.
@@ -2670,6 +2802,7 @@ function getPlanInputValues() {
             exclude: excludedRecipes(),
             season: seasonActive(),
             emode_facilities: activeEmodeFacilities(),
+            emode_facility_counts: activeEmodeFacilityCounts(),
             power_grid_rate: getPowerGridRate(),
             facilities,
             modules
@@ -2699,6 +2832,7 @@ function getPlanInputValues() {
         exclude: excludedRecipes(),
         season: seasonActive(),
         emode_facilities: activeEmodeFacilities(),
+        emode_facility_counts: activeEmodeFacilityCounts(),
         power_grid_rate: getPowerGridRate(),
         facilities,
         modules
@@ -2919,10 +3053,7 @@ function abilityDot(name, level, note) {
 }
 
 function aniimoLabel(step) {
-    const isEmode = isSimpleMode()
-        ? (document.getElementById('emode-simple-on')?.checked && selectedHomeLevel() >= 12 && FACILITIES.find(f => f.name === step.facility)?.supportsEmode)
-        : emodeFacilities.has(step.facility);
-    if (isEmode && step.status === 'producing') {
+    if (step.is_emode && step.status === 'producing') {
         return '<span class="tag emode-tag" title="Operating in Electric Mode (automatic, no Aniimo worker needed)">⚡ E-mode</span>';
     }
     const a = step.aniimo;

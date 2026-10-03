@@ -2923,4 +2923,60 @@ tr:hover .skip-row,
     margin: 0;
 }
 
+.power-gauge-container {
+    margin: 0.6rem 0 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.power-gauge-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    margin-bottom: 0.35rem;
+}
+
+.power-gauge-title {
+    font-weight: 600;
+    color: #f59e0b;
+}
+
+.power-gauge-value {
+    font-weight: 600;
+    font-size: 0.78rem;
+    color: var(--text);
+}
+
+.power-gauge-track {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.power-gauge-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #f59e0b);
+    border-radius: 3px;
+    transition: width 0.3s ease, background 0.3s ease;
+}
+
+.power-gauge-fill.overload {
+    background: #ef4444 !important;
+}
+
+.highlight-btn {
+    border-color: #f59e0b !important;
+    color: #f59e0b !important;
+    font-weight: 600;
+}
+
+.highlight-btn:hover {
+    background: rgba(245, 158, 11, 0.15) !important;
+}
+
+
 
