@@ -314,7 +314,17 @@ export const FACILITY_FOOTPRINTS = {
     'Dance Pad Polisher': [2.5, 2.5],
     'Aniipod Maker': [4.5, 4.5],
     'Storage Unit': [2, 2],
+    'Crackle Generator': [2, 2],
+    'Generator': [2, 2],
+    'Crackle Power Pole': [1.5, 1.5],
+    'Power Pole': [1.5, 1.5],
 };
+
+export const GENERATOR_POWER_RANGE = 11;
+export const POLE_POWER_RANGE = 7;
+export const POWER_POLE_COUNTS_BY_RV = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 6, 12, 12, 18, 18, 24, 24, 30
+];
 
 // The homeland: a 4x4 grid of plots, each 20 tiles wide and 15 tall, plot n opening at RV n (and
 // all of them from RV 16). Rows from the top, by plot number; the first opens bottom middle.

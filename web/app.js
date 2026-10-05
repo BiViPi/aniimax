@@ -1432,9 +1432,10 @@ function homelandPieces(plan, input) {
             unplaced.add(facility);
             return;
         }
-        allocations.forEach(jobs => {
+        allocations.forEach((jobs, idx) => {
             const weight = jobs.reduce((sum, j) => sum + j.rate * 3600, 0);
-            pieces.push({ members: [{ x: 0, y: 0, w: footprint[0], h: footprint[1], weight, jobs: jobs.length ? jobs : undefined, cycle: jobs[0]?.cycle, facility, crop: jobs[0]?.item ?? null, sensitive: false }] });
+            const isEmode = Boolean(input.emode_facility_counts?.[facility] && idx < input.emode_facility_counts[facility]);
+            pieces.push({ members: [{ x: 0, y: 0, w: footprint[0], h: footprint[1], weight, jobs: jobs.length ? jobs : undefined, cycle: jobs[0]?.cycle, facility, crop: jobs[0]?.item ?? null, sensitive: false, is_emode: isEmode }] });
         });
         count(facility, allocations.length);
     });
@@ -1458,7 +1459,7 @@ function homelandPieces(plan, input) {
             // A crop that needs an environment but is grown without one stays out of every
             // coverage square, so no building's temperature changes it.
             const growing = step.status === 'producing';
-            pieces.push({ members: [{ x: 0, y: 0, w: footprint[0], h: footprint[1], weight: tripsPerUnit(step), cycle: step.cycle_time, facility: step.facility, crop: growing ? step.item_name : null, sensitive: growing && needsEnvironment(step.item_name) }] });
+            pieces.push({ members: [{ x: 0, y: 0, w: footprint[0], h: footprint[1], weight: tripsPerUnit(step), cycle: step.cycle_time, facility: step.facility, crop: growing ? step.item_name : null, sensitive: growing && needsEnvironment(step.item_name), is_emode: !!step.is_emode }] });
         }
         count(step.facility, n);
     });
@@ -1478,6 +1479,37 @@ function homelandPieces(plan, input) {
         const building = f.name in ENVIRONMENT_BUILDING_SIZES;
         for (let i = 0; i < extra; i++) pieces.push({ members: [{ x: 0, y: 0, w: footprint[0], h: footprint[1], weight: 0, facility: f.name, crop: null, building, mode: null }] });
     });
+
+    // Add Crackle Generator (2x2) and Crackle Power Poles (1.5x1.5) when Electric Mode is active
+    const isEmodeActive = (document.getElementById('emode-simple-on')?.checked ?? true) || !!document.getElementById('emode-on')?.checked;
+    const hasElectricFacilities = (plan.coin_items || []).some(s => s.is_emode && s.status === 'producing') || (input.emode_facility_counts && Object.values(input.emode_facility_counts).some(c => c > 0));
+    const currentRv = layoutHomeLevel();
+    if ((isEmodeActive || currentRv >= 12) && hasElectricFacilities) {
+        // Crackle Generator (official 2x2 footprint, 11x11 square range)
+        pieces.push({
+            members: [{
+                x: 0, y: 0, w: 2, h: 2,
+                weight: 0,
+                facility: 'Crackle Generator',
+                generator: true,
+                sensitive: false
+            }]
+        });
+        // Crackle Power Poles (official 1.5x1.5 footprint, 7x7 square relay range, up to 2-3 poles for network extension)
+        const poleCount = currentRv >= 12 ? Math.min(3, Math.floor((currentRv - 10) / 2)) : 0;
+        for (let p = 0; p < poleCount; p++) {
+            pieces.push({
+                members: [{
+                    x: 0, y: 0, w: 1.5, h: 1.5,
+                    weight: 0,
+                    facility: 'Crackle Power Pole',
+                    powerPole: true,
+                    sensitive: false
+                }]
+            });
+        }
+    }
+
     return { pieces, unplaced: [...unplaced] };
 }
 
@@ -1489,10 +1521,18 @@ const LAYOUT_CATEGORY_COLORS = {
     'Materials Processing': '#8a7fc4',
     'Environment': '#9aa0a8',
 };
-const layoutColor = m => m.building
-    ? (ENVIRONMENT_MODE_COLORS[m.mode] || '#9aa0a8')
-    : ENVIRONMENT_FACILITY_COLORS[m.facility] || LAYOUT_CATEGORY_COLORS[FACILITY_CATEGORY_BY_NAME.get(m.facility)] || '#888888';
-const initialsOf = name => name.split(/[\s-]+/).map(w => w[0]).join('').toUpperCase();
+const layoutColor = m => {
+    if (m.generator || m.facility === 'Crackle Generator' || m.facility === 'Generator') return '#06b6d4';
+    if (m.powerPole || m.facility === 'Crackle Power Pole' || m.facility === 'Power Pole') return '#eab308';
+    return m.building
+        ? (ENVIRONMENT_MODE_COLORS[m.mode] || '#9aa0a8')
+        : ENVIRONMENT_FACILITY_COLORS[m.facility] || LAYOUT_CATEGORY_COLORS[FACILITY_CATEGORY_BY_NAME.get(m.facility)] || '#888888';
+};
+const initialsOf = name => {
+    if (name === 'Crackle Generator' || name === 'Generator') return '⚡GEN';
+    if (name === 'Crackle Power Pole' || name === 'Power Pole') return '⚡POLE';
+    return name.split(/[\s-]+/).map(w => w[0]).join('').toUpperCase();
+};
 
 let layoutRunId = 0;
 let layoutWorker = null;
@@ -1629,12 +1669,14 @@ function homelandSvg(layout, homeLevel) {
     const shapes = layout.pieces.flatMap(p => p.members).map(m => {
         const color = layoutColor(m);
         const away = Math.hypot(m.x + m.w / 2 - (layout.storage.x + layout.storage.w / 2), m.y + m.h / 2 - (layout.storage.y + layout.storage.h / 2));
+        const detailText = m.jobs ? m.jobs.map(j => prettyItem(j.item)).join(', ') : m.crop ? prettyItem(m.crop) : m.building && m.mode ? m.mode : (m.generator ? '11×11 Power Grid' : m.powerPole ? '7×7 Power Relay' : 'Idle');
         const tip = tipAttrs(m.facility, {
-            detail: m.jobs ? m.jobs.map(j => prettyItem(j.item)).join(', ') : m.crop ? prettyItem(m.crop) : m.building && m.mode ? m.mode : 'Idle',
+            detail: m.is_emode ? `${detailText} · ⚡ E-mode` : detailText,
             stats: m.weight > 0 ? `${formatRate(m.weight)} trips/hour · ${away.toFixed(1)} tiles from storage` : '',
             color,
         });
         const label = Math.min(m.w, m.h) >= 1.5 ? `<text x="${m.x + m.w / 2}" y="${m.y + m.h / 2}" font-size="${Math.min(0.8, m.w / 3)}">${initialsOf(m.facility)}</text>` : '';
+        const emodeBadge = m.is_emode ? `<text x="${m.x + m.w - 0.35}" y="${m.y + 0.45}" font-size="0.45" fill="#facc15" font-weight="bold">⚡</text>` : '';
         // Busier pieces are filled more solidly; idle ones are an outline.
         const fill = m.building ? 0.9 : m.weight > 0 ? 0.35 + 0.55 * Math.sqrt(m.weight / maxTrips) : 0.08;
         if (m.building) {
@@ -1643,8 +1685,8 @@ function homelandSvg(layout, homeLevel) {
                 fill="${color}" fill-opacity="${m.mode ? 1 : 0.25}" stroke="currentColor" stroke-opacity="0.6" stroke-width="0.08" />
                 ${m.mode ? environmentBuildingIcon(m.facility, m.mode, m.x + m.w / 2, m.y + m.h / 2) : ''}</g>`;
         }
-        return `<g class="layout-piece" ${tip}><rect x="${m.x + 0.04}" y="${m.y + 0.04}" width="${m.w - 0.08}" height="${m.h - 0.08}" rx="0.2"
-            fill="${color}" fill-opacity="${fill.toFixed(2)}" stroke="${color}" stroke-width="0.06" />${label}</g>`;
+        return `<g class="layout-piece${m.is_emode ? ' layout-emode-piece' : ''}" ${tip}><rect x="${m.x + 0.04}" y="${m.y + 0.04}" width="${m.w - 0.08}" height="${m.h - 0.08}" rx="0.2"
+            fill="${color}" fill-opacity="${fill.toFixed(2)}" stroke="${m.is_emode ? '#facc15' : color}" stroke-width="${m.is_emode ? '0.1' : '0.06'}" />${label}${emodeBadge}</g>`;
     }).join('');
     const coverageShapes = coverage.map(c => {
         const tint = ENVIRONMENT_MODE_COLORS[c.mode] || '#9aa0a8';
@@ -1677,6 +1719,44 @@ function homelandSvg(layout, homeLevel) {
         <g class="layout-flows" pointer-events="none">${flows}<g class="layout-dots"></g></g>
         <g class="layout-piece layout-storage-unit" ${tipAttrs('Storage Unit', { detail: 'Where everything is carried', stats: totalTrips > 0 ? `${formatRate(totalTrips)} trips/hour` : '' })}><rect x="${s.x + 0.04}" y="${s.y + 0.04}" width="${s.w - 0.08}" height="${s.h - 0.08}" rx="0.2" class="layout-storage" />
         <text x="${s.x + s.w / 2}" y="${s.y + s.h / 2}" font-size="0.8" class="layout-storage-text">SU</text></g>
+        ${(() => {
+            const members = layout.pieces.flatMap(p => p.members);
+            const genPiece = members.find(m => m.facility === 'Crackle Generator' || m.facility === 'Generator' || m.generator);
+            const poles = members.filter(m => m.facility === 'Crackle Power Pole' || m.facility === 'Power Pole' || m.powerPole);
+
+            let aura = '';
+            if (genPiece) {
+                // 11x11 square range for Crackle Generator (official Aniimo mechanics)
+                const gx = genPiece.x - (11 - genPiece.w) / 2;
+                const gy = genPiece.y - (11 - genPiece.h) / 2;
+                const genCenter = { x: genPiece.x + genPiece.w / 2, y: genPiece.y + genPiece.h / 2 };
+
+                aura += `<g class="generator-power-network" pointer-events="none">
+                    <!-- Crackle Generator 11x11 Square Grid -->
+                    <rect x="${gx}" y="${gy}" width="11" height="11" rx="0.3"
+                        fill="#06b6d4" fill-opacity="0.06" stroke="#06b6d4" stroke-opacity="0.6" stroke-width="0.16" stroke-dasharray="0.8 0.4" />
+                    <text x="${genCenter.x}" y="${gy - 0.35}" font-size="0.72" fill="#06b6d4" font-weight="700" text-anchor="middle">⚡ Crackle Generator (11×11 Grid)</text>`;
+
+                let lastNode = genCenter;
+                poles.forEach((pole, idx) => {
+                    const px = pole.x - (7 - pole.w) / 2;
+                    const py = pole.y - (7 - pole.h) / 2;
+                    const pCenter = { x: pole.x + pole.w / 2, y: pole.y + pole.h / 2 };
+                    aura += `
+                        <!-- Power Pole #${idx + 1} 7x7 Relay Range -->
+                        <rect x="${px}" y="${py}" width="7" height="7" rx="0.25"
+                            fill="#eab308" fill-opacity="0.04" stroke="#eab308" stroke-opacity="0.5" stroke-width="0.12" stroke-dasharray="0.5 0.25" />
+                        <!-- Power Transmission Cable -->
+                        <line x1="${lastNode.x}" y1="${lastNode.y}" x2="${pCenter.x}" y2="${pCenter.y}"
+                            stroke="#06b6d4" stroke-width="0.14" stroke-dasharray="0.4 0.2" stroke-opacity="0.75" />
+                        <text x="${pCenter.x}" y="${py - 0.25}" font-size="0.55" fill="#eab308" font-weight="600" text-anchor="middle">⚡ Pole #${idx + 1} (7×7 Relay)</text>
+                    `;
+                    lastNode = pCenter;
+                });
+                aura += `</g>`;
+            }
+            return aura;
+        })()}
     </svg>`;
 }
 

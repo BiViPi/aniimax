@@ -3035,5 +3035,16 @@ tr:hover .skip-row,
     background: rgba(245, 158, 11, 0.15) !important;
 }
 
+/* E-mode Layout & Power Network Styling */
+.generator-power-network line {
+    animation: transmissionLinePulse 2.5s ease-in-out infinite alternate;
+}
 
+@keyframes transmissionLinePulse {
+    0% { stroke-opacity: 0.45; }
+    100% { stroke-opacity: 0.95; }
+}
 
+.layout-emode-piece rect {
+    filter: drop-shadow(0 0 1px rgba(250, 204, 21, 0.4));
+}
